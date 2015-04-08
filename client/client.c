@@ -11,26 +11,37 @@ int main(int argc, char *argv[]){
 	else{
 		DEBUG = 0;
 	}
-	printf("Welcome to FxA file transfer application!\nPlease enter who to connect to:");
+	printf("Welcome to FxA file transfer application!\nPlease enter a command:");
 	char buffer[300] = {0};
-	char ip[100] = {0};
-	char port[100] = {0};
+	char cmd[100] = {0};
+	char arg1[100] = {0};
+	char arg2[100] = {0};
 	while(fgets(buffer,sizeof(buffer),stdin)){
-		sscanf(buffer, "%s %s",ip,port);
-		char* colon = strchr(buffer,':');
-		if(colon != NULL || strlen(port) == 0){
-			quit("Example usage: 127.0.0.1 5000");
+		sscanf(buffer, "%s %s %s",cmd,arg1,arg2);
+		if(strcmp(cmd,"connect") == 0){
+			char* colon = strchr(buffer,':');
+			if(colon != NULL || strlen(arg2) == 0){
+				printf("Example usage: 127.0.0.1 5000");
+			}
+			if(DEBUG) printf("IP:%s\nPort:%s\n",arg1,arg2);
+			printf("Connecting to server...");
+			if(connect_to_server(arg1,arg2)){
+				printf("Done!\n");
+			}
+			else{
+				printf("Could not connect to server. Please try again later");
+			}
 		}
-		break;
+		if(strcmp(cmd,"quit") == 0){
+			exit(0);
+		}
+		
+		bzero(buffer,sizeof(buffer));
+		bzero(cmd,sizeof(cmd));
+		bzero(arg1,sizeof(arg1));
+		bzero(arg2,sizeof(arg2));
 	}
-	if(DEBUG) printf("IP:%s\nPort:%s\n",ip,port);
-	printf("Connecting to server...");
-	if(connect_to_server(ip,port)){
-		printf("Done!\n");
-	}
-	else{
-		quit("Could not connect to server. Please try again later");
-	}
+	
 	
 }
 
