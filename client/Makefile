@@ -6,3 +6,6 @@ all:
 	
 clean:
 	rm -f fxa-client
+
+clena:
+	rm -f fxa-client

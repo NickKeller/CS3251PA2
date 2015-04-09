@@ -6,3 +6,6 @@ all:
 	
 clean:
 	rm -f fxa-server
+	
+clena:
+	rm -f fxa-server

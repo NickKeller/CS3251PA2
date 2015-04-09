@@ -2,6 +2,7 @@
 
 int DEBUG;
 CONN_INFO* connection;
+int connection_set;
 
 int main(int argc, char *argv[]){
 	int opts;
@@ -11,6 +12,7 @@ int main(int argc, char *argv[]){
 	else{
 		DEBUG = 0;
 	}
+	connection_set = 0;
 	printf("Welcome to FxA file transfer application!\nPlease enter a command:");
 	char buffer[300] = {0};
 	char cmd[100] = {0};
@@ -18,28 +20,93 @@ int main(int argc, char *argv[]){
 	char arg2[100] = {0};
 	while(fgets(buffer,sizeof(buffer),stdin)){
 		sscanf(buffer, "%s %s %s",cmd,arg1,arg2);
+		//connect command
 		if(strcmp(cmd,"connect") == 0){
-			char* colon = strchr(buffer,':');
-			if(colon != NULL || strlen(arg2) == 0){
-				printf("Example usage: 127.0.0.1 5000");
-			}
-			if(DEBUG) printf("IP:%s\nPort:%s\n",arg1,arg2);
-			printf("Connecting to server...");
-			if(connect_to_server(arg1,arg2)){
-				printf("Done!\n");
+			if(connection_set){
+				printf("You already have an open connection. Please close that one before opening a new connection\n");
 			}
 			else{
-				printf("Could not connect to server. Please try again later");
+				char* colon = strchr(buffer,':');
+				if(colon != NULL || strlen(arg2) == 0 || strlen(arg1) == 0){
+					printf("Example usage: 127.0.0.1 5000\n");
+				}
+				else{
+					if(DEBUG) printf("IP:%s\nPort:%s\n",arg1,arg2);
+					printf("Connecting to server...");
+					if(connect_to_server(arg1,arg2)){
+						printf("Done!\n");
+					}
+					else{
+						printf("Could not connect to server. Please try again later");
+					}
+				}
 			}
 		}
-		if(strcmp(cmd,"quit") == 0){
-			exit(0);
+		//get command, will only work if a connection is set up
+		else if(strcmp(cmd,"get") == 0){
+			if(!connection_set){
+				printf("Must set up connection first\n");
+			}
+			
+			else if(strlen(arg1) == 0){
+				printf("Example usage: get file.c\n");
+			}
+			
+			else if(fxa_get(arg1)){
+				printf("File %s successfully downloaded!\n",arg1);
+			}
+			
+			else{
+				printf("Could not upload file\n");
+			}
+		}
+		
+		else if(strcmp(cmd,"put") == 0){
+			if(!connection_set){
+				printf("Must set up connection first\n");
+			}
+			
+			else if(strlen(arg1) == 0){
+				printf("Example usage: put file.c\n");
+			}
+			
+			else if(fxa_put(arg1)){
+				printf("File %s successfully uploaded!\n",arg1);
+			}
+			
+			else{
+				printf("Could not download file\n");
+			}
+		}
+		
+		else if(strcmp(cmd,"close") == 0){
+			if(!connection_set){
+				printf("Must set up connection first\n");
+			}
+			
+			else{
+				if(fxa_close()){
+					printf("Connection successfully closed\n");
+					connection_set = 0;
+					bzero(connection,sizeof(CONN_INFO));
+				}
+			}
+		}
+		
+		else if(strcmp(cmd,"quit") == 0){
+			quit("Goodbye!");
+		}
+		
+		else{
+			printf("Available commands are: connect,get,put,close,quit\n");
 		}
 		
 		bzero(buffer,sizeof(buffer));
 		bzero(cmd,sizeof(cmd));
 		bzero(arg1,sizeof(arg1));
 		bzero(arg2,sizeof(arg2));
+		
+		printf("Please enter a command:");
 	}
 	
 	
@@ -104,13 +171,27 @@ int connect_to_server(char *ip, char* port){
 		return 0;
 	}
 
-	printf("%s\n",&recvBuffer[5]);
+	if(DEBUG) printf("%s\n",&recvBuffer[5]);
 	if(strcmp(&recvBuffer[5],"Welcome to our service\n") == 0){
+		connection_set = 1;
 		return 1;
 	} 
 
 
 	return 0;
+}
+
+int fxa_get(char* filename){
+	
+	return 0;
+}
+
+int fxa_put(char* filename){
+	return 0;
+}
+
+int fxa_close(){
+	return 1;
 }
 
 void print_use_and_exit(){
