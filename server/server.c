@@ -7,7 +7,7 @@ char *passwords[] = {"pass1","pass2","pass3"};
 CLIENT* client1;
 CLIENT* client2;
 CLIENT* current_client;
-
+CONN_INFO *connection;
 char* REQ_MSG = "REQ";
 char* RES_MSG = "RES";
 
@@ -44,7 +44,7 @@ int main(int argc, char *argv[]){
 		perror("Cannot create socket\n");
 		return 0;
 	}
-	//CONN_INFO* connection = setup_socket(port);
+	connection = calloc(1, sizeof(CONN_INFO));
 	printf("Binding server on port %d\n",port);
 	struct sockaddr_in myaddr;
 	struct sockaddr_in remaddr;
@@ -72,6 +72,9 @@ int main(int argc, char *argv[]){
 		int sizeReceived = 0;
 		//allow a maximum of 1024 bytes for this login process, don't need more than that
 		sizeReceived = recvfrom(sock,buffer,BUFFER_SIZE,0, (struct sockaddr*)&remaddr,&addrlen);
+		connection->socket = sock;
+		connection->addrlen = addrlen;
+		connection->addr = (struct sockaddr*)&remaddr;
 		if(DEBUG) printf("Message Received:%s\nMessage size:%d\nPort Received From:%d\nIP Received from: %s\n",buffer,sizeReceived,remaddr.sin_port,inet_ntoa(remaddr.sin_addr));
 		//figure out the client
 		//figureOutClient(remaddr);
@@ -86,7 +89,8 @@ int main(int argc, char *argv[]){
 			}
 		}
 		//clear the current client, we're done
-		current_client->port = -1;			
+		current_client->port = -1;	
+		bzero(connection,sizeof(CONN_INFO));		
 	}
 	return 0;
 }
@@ -114,11 +118,104 @@ int process(char* message,int sizeOfBuffer, int port, char ** response){
 		if(strncmp(buffer,"RES",3) == 0){
 			return process_response(&buffer[5],posOfNewLine,response);
 		}
+		if(strncmp(buffer,"GET",3) == 0){
+			return put_file(&buffer[5],posOfNewLine,response);
+		}
+		if(strncmp(buffer,"PUT",3) == 0){
+			return get_file(&buffer[5],posOfNewLine,response);
+		}
 		return 1;
 	}
 	else{
 		return 0;
 	}
+}
+
+int get_file(char* buffer, int sizeOfBuffer, char** response){
+	sendto(connection->socket,"ACK",3,0,connection->addr,connection->addrlen);
+	FILE* file = fopen("get/server.h","wb");
+	char* recvBuffer = calloc(1000,sizeof(char));
+	int numBytesWritten = 0;
+	while(1){
+		int numBytesRecv = timeout_recvfrom(connection->socket,recvBuffer,1000,0,
+									connection->addr,&(connection->addrlen),2,"ACK");
+		if(strncmp(recvBuffer,"EOF",3) == 0){
+			if(DEBUG) printf("Reached EOF\n");
+			break;
+		}
+	
+		if(DEBUG) printf("Num Bytes Recv: %d\nStrlen:%d\n",numBytesRecv,strlen(recvBuffer));
+	//	if(DEBUG) printf("Message Received: %s\n",recvBuffer);
+		//write the buffer into the file
+		numBytesWritten = fwrite(recvBuffer,sizeof(char),numBytesRecv,file);
+		if(numBytesWritten == numBytesRecv){
+			//send an ACK
+			if(DEBUG) printf("Successfully wrote %d bytes to file\n",numBytesWritten);
+			sendto(connection->socket,"ACK",3,0,connection->addr,connection->addrlen);
+		}
+		bzero(recvBuffer,1000);
+		numBytesWritten = 0;
+	}
+	
+	fclose(file);
+	return 1;
+}
+
+int put_file(char* buffer, int sizeOfBuffer, char** response){
+	int result = 1;
+	char* filename = calloc(strlen(buffer),sizeof(char));
+	memcpy(filename,buffer,strlen(buffer));
+	if(DEBUG) printf("File to put is: %s_blah\n",filename);
+	char* message = calloc(4 + strlen(filename),sizeof(char));
+	memcpy(message,"EOF ",4);
+	memcpy(&message[4],filename,strlen(filename));
+	*response = message;
+	
+	//time to send the file
+	char* fileFolder = "put/";
+	char* fullpath = calloc(4 + strlen(filename),sizeof(char));
+	memcpy(fullpath,fileFolder,4);
+	memcpy(&fullpath[4],filename,strlen(filename));
+	if(DEBUG) printf("Opening file:%s_blah\n",fullpath);
+	
+	//this code came from a lc3 emulator that I wrote in my CS2110 class. It was used to read an object file
+	FILE *file = fopen(fullpath, "rb");
+	if(file == NULL){
+		*response = "Error, file doesn't exist!\n";
+		return 1;
+	}
+	//allocate space for the shorts to be read in
+	char packet[1000];
+	int numElements = 0;
+	char bstop = 0;
+	//run the loop until end of file
+	while(!bstop){
+		//read in the starting address and number of elements
+		numElements = fread(packet, sizeof(char), 1000, file);
+		//check for EOF
+		if(numElements < 1000){
+			//EOF reached, break
+			bstop = 1;
+		}
+		//send off the file, wait for an ACK
+		int numBytesSent = sendto(connection->socket,packet,strlen(packet),0,
+							  connection->addr,connection->addrlen);
+		
+		if(DEBUG) printf("Num bytes sent: %d\n",numBytesSent);
+		if(DEBUG) printf("Message Sent: %s\n",packet);
+		
+		char recvBuffer[100];
+		int numBytesRecv = recvfrom(connection->socket,recvBuffer,100,0, connection->addr,&(connection->addrlen));
+		if(strncmp(recvBuffer,"ACK",3) == 0){
+			if(DEBUG) printf("Received ACK\n");
+		}
+		numElements = 0;
+		bzero(packet,1000);
+		bzero(recvBuffer,100);
+	}
+	
+	fclose(file);
+	return result;
 }
 
 int process_response(char *buffer, int sizeOfBuffer, char ** response){
@@ -215,4 +312,46 @@ void figureOutClient(struct sockaddr_in remaddr){
 	else if((client2->port == port) && (strcmp(client2->ip,ip) == 0)){
 		current_client = client2;
 	}
+}
+
+int timeout_recvfrom (int sock, char *buf, int bufSize, int flags, struct sockaddr *connection, socklen_t *addrlen,int timeoutinseconds,char* messageToSend)
+{
+    fd_set socks;
+    struct timeval t;
+    t.tv_usec=0;
+    FD_ZERO(&socks);
+    FD_SET(sock, &socks);
+    t.tv_sec = timeoutinseconds;
+    if(DEBUG) printf("Starting Select\n");
+    int tries = 0;
+    int numBytesRecv = 0;
+    while(select(sock + 1, &socks, NULL, NULL, &t) <= 0){
+    	//timeout, send again
+    	tries++;
+    	//don't try more than 5 times
+    	if(tries == 5){
+	    	return -1;
+    	}
+    	if(DEBUG) printf("Connection Timeout - Trying again\n");
+    	t.tv_sec = timeoutinseconds;
+    	int res = 0;
+    	while(res <= 0){
+    		res = sendto(sock,messageToSend,strlen(messageToSend),0,connection,*addrlen);
+			if(DEBUG) printf("Sent %d bytes\n",res);
+			if(res == -1){
+				printf("Error\n");
+			}    		
+    	}
+    	if(DEBUG) printf("Done Sending\n");
+    	FD_ZERO(&socks);
+	    FD_SET(sock, &socks);
+    }
+    if(DEBUG) printf("Done with select\n");
+    numBytesRecv = recvfrom(sock, buf, bufSize, 0, connection, addrlen);
+    if (numBytesRecv !=-1)
+        {
+        return numBytesRecv;
+        }
+    else
+        return 0;
 }

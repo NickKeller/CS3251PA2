@@ -14,12 +14,12 @@
 #define UDP_SERVER_H
 
 #define BUFFER_SIZE 100
-/*
+
 typedef struct _CONN_INFO{
 	int socket;
 	socklen_t addrlen;
 	struct sockaddr *addr;
-} CONN_INFO;*/
+} CONN_INFO;
 
 typedef struct _CLIENT{
 	int port;
@@ -32,10 +32,14 @@ void print_use_and_exit(void);
 int process(char* buffer, int sizeOfBuffer, int port,char ** response);
 int process_response(char *buffer, int sizeOfBuffer, char ** response);
 int process_request(char *buffer, int sizeOfBuffer, char ** response);
+int put_file(char* buffer, int sizeOfBuffer, char** response);
+int get_file(char* buffer, int sizeOfBuffer, char** response);
+int timeout_recvfrom (int sock, char *buf, int bufSize, int flags, struct sockaddr *connection, socklen_t *addrlen,int timeoutinseconds,char* messageToSend);
 char * generate_string(void);
 char* doMD5(char* buffer);
 unsigned *md5( const char *msg, int mlen);
 void figureOutClient(struct sockaddr_in remaddr);
+
 //CONN_INFO* setup_socket(char* port);
 
 

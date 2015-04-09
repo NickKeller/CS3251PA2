@@ -175,22 +175,124 @@ int connect_to_server(char *ip, char* port){
 	if(strcmp(&recvBuffer[5],"Welcome to our service\n") == 0){
 		connection_set = 1;
 		return 1;
-	} 
-
+	}
 
 	return 0;
 }
 
 int fxa_get(char* filename){
+	FILE* file = fopen("get/server.h","wb");
+	int numBytesWritten = 0;
+	char* newFileName = calloc(1 + strlen(filename), sizeof(char));
+	memcpy(newFileName,filename,strlen(filename));
+	memcpy(&newFileName[strlen(filename)],"\n",1);
+	char* message = calloc(5 + strlen(newFileName), sizeof(char));
+	memcpy(message,"GET: ",5);
+	memcpy(&message[5],newFileName,strlen(newFileName));
+	if(DEBUG) printf("Message is: %s\n",message);
+	//send the GET message
+	int numBytesSent = sendto(connection->socket,message,strlen(message),0,
+							  connection->remote_addr,connection->addrlen);
+	if(DEBUG) printf("Num Bytes Sent: %d\n",numBytesSent);
+	char* recvBuffer = calloc(1000,sizeof(char));
+	while(1){
+		int numBytesRecv = timeout_recvfrom(connection->socket,recvBuffer,1000,0,
+									connection->remote_addr,&(connection->addrlen),2,message);
+		if(strncmp(recvBuffer,"EOF",3) == 0){
+			if(DEBUG) printf("Reached EOF\n");
+			break;
+		}
 	
-	return 0;
+		if(DEBUG) printf("Num Bytes Recv: %d\nStrlen:%d\n",numBytesRecv,strlen(recvBuffer));
+	//	if(DEBUG) printf("Message Received: %s\n",recvBuffer);
+		//write the buffer into the file
+		numBytesWritten = fwrite(recvBuffer,sizeof(char),numBytesRecv,file);
+		if(numBytesWritten == numBytesRecv){
+			//send an ACK
+			if(DEBUG) printf("Successfully wrote %d bytes to file\n",numBytesWritten);
+			sendto(connection->socket,"ACK",3,0,connection->remote_addr,connection->addrlen);
+		}
+		bzero(recvBuffer,1000);
+		numBytesWritten = 0;
+	}
+	
+	fclose(file);
+	return 1;
 }
 
 int fxa_put(char* filename){
-	return 0;
+	char* newFileName = calloc(1 + strlen(filename), sizeof(char));
+	memcpy(newFileName,filename,strlen(filename));
+	memcpy(&newFileName[strlen(filename)],"\n",1);
+	char* message = calloc(5 + strlen(newFileName), sizeof(char));
+	memcpy(message,"PUT: ",5);
+	memcpy(&message[5],newFileName,strlen(newFileName));
+	if(DEBUG) printf("Message is: %s\n",message);
+	int numBytesSent = sendto(connection->socket,message,strlen(message),0,
+							  connection->remote_addr,connection->addrlen);
+	if(DEBUG) printf("Num Bytes Sent: %d\n",numBytesSent);
+	
+	//wait for an ACK before proceeding
+	char ACK[10] = {0};
+	recvfrom(connection->socket,ACK,10,0, connection->remote_addr,&(connection->addrlen));
+	
+	int result = 1;
+	if(DEBUG) printf("File to put is: %s_blah\n",filename);
+	
+	//time to send the file
+	char* fileFolder = "put/";
+	char* fullpath = calloc(4 + strlen(filename),sizeof(char));
+	memcpy(fullpath,fileFolder,4);
+	memcpy(&fullpath[4],filename,strlen(filename));
+	if(DEBUG) printf("Opening file:%s_blah\n",fullpath);
+	
+	//this code came from a lc3 emulator that I wrote in my CS2110 class. It was used to read an object file
+	FILE *file = fopen(fullpath, "rb");
+	if(file == NULL){
+		printf("Error, %s doesn't exist!\n",filename);
+		return 0;
+	}
+	//allocate space for the shorts to be read in
+	char packet[1000];
+	int numElements = 0;
+	char bstop = 0;
+	//run the loop until end of file
+	while(!bstop){
+		//read in the starting address and number of elements
+		numElements = fread(packet, sizeof(char), 1000, file);
+		//check for EOF
+		if(numElements < 1000){
+			//EOF reached, break
+			bstop = 1;
+		}
+		//send off the file, wait for an ACK
+		int numBytesSent = sendto(connection->socket,packet,strlen(packet),0,
+							  connection->remote_addr,connection->addrlen);
+		
+		if(DEBUG) printf("Num bytes sent: %d\n",numBytesSent);
+		if(DEBUG) printf("Message Sent: %s\n",packet);
+		
+		char recvBuffer[100];
+		int numBytesRecv = recvfrom(connection->socket,recvBuffer,100,0, connection->remote_addr,&(connection->addrlen));
+		if(strncmp(recvBuffer,"ACK",3) == 0){
+			if(DEBUG) printf("Received ACK\n");
+		}
+		numElements = 0;
+		bzero(packet,1000);
+		bzero(recvBuffer,100);
+	}
+	
+	fclose(file);
+	//send the EOF message
+	sendto(connection->socket,"EOF",3,0, connection->remote_addr,connection->addrlen);
+	return result;
 }
 
 int fxa_close(){
+	char* message = "FIN\n";
+	int numBytesSent = sendto(connection->socket,message,strlen(message),0,
+							  connection->remote_addr,connection->addrlen);
+	if(DEBUG) printf("Num Bytes Sent: %d\n",numBytesSent);
 	return 1;
 }
 
@@ -252,6 +354,7 @@ int timeout_recvfrom (int sock, char *buf, int bufSize, int flags, struct sockad
     t.tv_sec = timeoutinseconds;
     if(DEBUG) printf("Starting Select\n");
     int tries = 0;
+    int numBytesRecv = 0;
     while(select(sock + 1, &socks, NULL, NULL, &t) <= 0){
     	//timeout, send again
     	tries++;
@@ -274,9 +377,10 @@ int timeout_recvfrom (int sock, char *buf, int bufSize, int flags, struct sockad
 	    FD_SET(sock, &socks);
     }
     if(DEBUG) printf("Done with select\n");
-    if (recvfrom(sock, buf, bufSize, 0, connection, addrlen)!=-1)
+    numBytesRecv = recvfrom(sock, buf, bufSize, 0, connection, addrlen);
+    if (numBytesRecv !=-1)
         {
-        return 1;
+        return numBytesRecv;
         }
     else
         return 0;
