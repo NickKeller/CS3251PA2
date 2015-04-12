@@ -244,33 +244,35 @@ int fxa_get(char* filename){
 	char* recvBuffer = calloc(100,sizeof(char));
 	int eof = 0;
 	while(!eof){
-		int numBytesRecv = 0;
-		int numBytesWritten = 0;
+		int numBytesRecvTotal = 0;
+		int numBytesWrittenTotal = 0;
 		for(int i = 0; i < windowSize;i++){
-			numBytesRecv += timeout_recvfrom(connection->socket,recvBuffer,100,0,
+			int numBytesRecv = timeout_recvfrom(connection->socket,recvBuffer,100,0,
 										connection->remote_addr,&(connection->addrlen),2,message);
+			numBytesRecvTotal += numBytesRecv;
 			if(strncmp(recvBuffer,"EOF",3) == 0){
 				if(DEBUG) printf("Reached EOF\n");
 				eof = 1;
 				break;
 			}
 	
-			if(DEBUG) printf("Num Bytes Recv: %d\nStrlen:%d\n",numBytesRecv,strlen(recvBuffer));
+			if(DEBUG) printf("Num Bytes Recv: %d\nStrlen:%d\n",numBytesRecvTotal,strlen(recvBuffer));
 		//	if(DEBUG) printf("Message Received: %s\n",recvBuffer);
 			//write the buffer into the file
-			numBytesWritten += fwrite(recvBuffer,sizeof(char),numBytesRecv,file);
-			if(DEBUG) printf("Num Bytes Written: %d\n",numBytesWritten);
+			int numBytesWritten = fwrite(recvBuffer,sizeof(char),numBytesRecv,file);
+			numBytesWrittenTotal += numBytesWritten;
+			if(DEBUG) printf("Num Bytes Written: %d\n",numBytesWrittenTotal);
 			
 		}
 		
-		if(numBytesWritten == numBytesRecv){
+		if(numBytesWrittenTotal == numBytesRecvTotal){
 			//send an ACK
-			if(DEBUG) printf("Successfully wrote %d bytes to file\n",numBytesWritten);
+			if(DEBUG) printf("Successfully wrote %d bytes to file\n",numBytesWrittenTotal);
 			sendto(connection->socket,"ACK",3,0,connection->remote_addr,connection->addrlen);
 		}
 		bzero(recvBuffer,100);
-		numBytesWritten = 0;
-		numBytesRecv = 0;
+		numBytesWrittenTotal = 0;
+		numBytesRecvTotal = 0;
 	}
 	
 	fclose(file);
@@ -278,16 +280,25 @@ int fxa_get(char* filename){
 }
 
 int fxa_put(char* filename){
-	char* newFileName = calloc(1 + strlen(filename), sizeof(char));
-	memcpy(newFileName,filename,strlen(filename));
-	memcpy(&newFileName[strlen(filename)],"\n",1);
-	char* message = calloc(5 + strlen(newFileName), sizeof(char));
+
+	char* fullpath = convert_name(filename,"put/");	
+	int numBytesWritten = 0;
+	
+	char* message = calloc(12 + strlen(filename), sizeof(char));
+	char* window = calloc(7,sizeof(char));
+	char* windowsize = calloc(4,sizeof(char));
+	int bytes = snprintf(windowsize,sizeof(windowSize),"%d",windowSize);
+	printf("WindowSize: %s\nBytes:%d\n",windowsize,bytes);
 	memcpy(message,"PUT: ",5);
-	memcpy(&message[5],newFileName,strlen(newFileName));
+	memcpy(&message[5],filename,strlen(filename));
+	memcpy(window," WIN:",5);
+	memcpy(&window[5],windowsize,1);
+	memcpy(&window[6],"\n",1);
+	memcpy(&message[5+strlen(filename)],window,strlen(window));
 	if(DEBUG) printf("Message is: %s\n",message);
-	int numBytesSent = sendto(connection->socket,message,strlen(message),0,
-							  connection->remote_addr,connection->addrlen);
-	if(DEBUG) printf("Num Bytes Sent: %d\n",numBytesSent);
+	
+	//send the PUT message
+	sendto(connection->socket,message,strlen(message),0,connection->remote_addr,connection->addrlen);
 	
 	//wait for an ACK before proceeding
 	char ACK[10] = {0};
@@ -297,10 +308,6 @@ int fxa_put(char* filename){
 	if(DEBUG) printf("File to put is: %s_blah\n",filename);
 	
 	//time to send the file
-	char* fileFolder = "put/";
-	char* fullpath = calloc(4 + strlen(filename),sizeof(char));
-	memcpy(fullpath,fileFolder,4);
-	memcpy(&fullpath[4],filename,strlen(filename));
 	if(DEBUG) printf("Opening file:%s_blah\n",fullpath);
 	
 	//this code came from a lc3 emulator that I wrote in my CS2110 class. It was used to read an object file
