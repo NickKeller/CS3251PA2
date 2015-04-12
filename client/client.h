@@ -26,6 +26,7 @@ int connect_to_server(char* ip, char* port);
 int fxa_get(char* filename);
 int fxa_put(char* filename);
 int fxa_close(void);
+char* convert_name(char* filename, char* prefix);
 unsigned *md5( const char *msg, int mlen);
 int timeout_recvfrom (int sock, char *buf, int bufSize, int flags, struct sockaddr *connection, socklen_t *addrlen,int timeoutinseconds,char* messageToSend);
 void quit(char* message);

@@ -132,8 +132,14 @@ int process(char* message,int sizeOfBuffer, int port, char ** response){
 }
 
 int get_file(char* buffer, int sizeOfBuffer, char** response){
+	//convert filename to get/filename
+	char* fullpath = convert_name(buffer,"get/");
+	
+	//send off the ACK
 	sendto(connection->socket,"ACK",3,0,connection->addr,connection->addrlen);
-	FILE* file = fopen("get/server.h","wb");
+	
+	//open the file in binary mode for writing
+	FILE* file = fopen(fullpath,"wb");
 	char* recvBuffer = calloc(1000,sizeof(char));
 	int numBytesWritten = 0;
 	while(1){
@@ -172,10 +178,7 @@ int put_file(char* buffer, int sizeOfBuffer, char** response){
 	*response = message;
 	
 	//time to send the file
-	char* fileFolder = "put/";
-	char* fullpath = calloc(4 + strlen(filename),sizeof(char));
-	memcpy(fullpath,fileFolder,4);
-	memcpy(&fullpath[4],filename,strlen(filename));
+	char* fullpath = convert_name(buffer,"put/");
 	if(DEBUG) printf("Opening file:%s_blah\n",fullpath);
 	
 	//this code came from a lc3 emulator that I wrote in my CS2110 class. It was used to read an object file
@@ -354,4 +357,11 @@ int timeout_recvfrom (int sock, char *buf, int bufSize, int flags, struct sockad
         }
     else
         return 0;
+}
+
+char* convert_name(char* filename, char* prefix){
+	char* fullpath = calloc(strlen(prefix) + strlen(filename),sizeof(char));
+	memcpy(fullpath,prefix,4);
+	memcpy(&fullpath[4],filename,strlen(filename));
+	return fullpath;
 }

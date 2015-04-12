@@ -181,7 +181,10 @@ int connect_to_server(char *ip, char* port){
 }
 
 int fxa_get(char* filename){
-	FILE* file = fopen("get/server.h","wb");
+
+	char* fullpath = convert_name(filename,"get/");	
+	
+	FILE* file = fopen(filename,"wb");
 	int numBytesWritten = 0;
 	char* newFileName = calloc(1 + strlen(filename), sizeof(char));
 	memcpy(newFileName,filename,strlen(filename));
@@ -384,6 +387,14 @@ int timeout_recvfrom (int sock, char *buf, int bufSize, int flags, struct sockad
         }
     else
         return 0;
+}
+
+
+char* convert_name(char* filename, char* prefix){
+	char* fullpath = calloc(strlen(prefix) + strlen(filename),sizeof(char));
+	memcpy(fullpath,prefix,4);
+	memcpy(&fullpath[4],filename,strlen(filename));
+	return fullpath;
 }
 
 void quit(char* message){
