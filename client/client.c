@@ -221,7 +221,7 @@ int fxa_get(char* filename){
 
 	char* fullpath = convert_name(filename,"get/");	
 	
-	FILE* file = fopen(filename,"wb");
+	FILE* file = fopen(fullpath,"wb");
 	int numBytesWritten = 0;
 	
 	char* message = calloc(12 + strlen(filename), sizeof(char));
@@ -242,7 +242,8 @@ int fxa_get(char* filename){
 							  connection->remote_addr,connection->addrlen);
 	if(DEBUG) printf("Num Bytes Sent: %d\n",numBytesSent);
 	char* recvBuffer = calloc(100,sizeof(char));
-	while(1){
+	int eof = 0;
+	while(!eof){
 		int numBytesRecv = 0;
 		int numBytesWritten = 0;
 		for(int i = 0; i < windowSize;i++){
@@ -250,6 +251,7 @@ int fxa_get(char* filename){
 										connection->remote_addr,&(connection->addrlen),2,message);
 			if(strncmp(recvBuffer,"EOF",3) == 0){
 				if(DEBUG) printf("Reached EOF\n");
+				eof = 1;
 				break;
 			}
 	
@@ -257,6 +259,7 @@ int fxa_get(char* filename){
 		//	if(DEBUG) printf("Message Received: %s\n",recvBuffer);
 			//write the buffer into the file
 			numBytesWritten += fwrite(recvBuffer,sizeof(char),numBytesRecv,file);
+			if(DEBUG) printf("Num Bytes Written: %d\n",numBytesWritten);
 			
 		}
 		
@@ -267,6 +270,7 @@ int fxa_get(char* filename){
 		}
 		bzero(recvBuffer,100);
 		numBytesWritten = 0;
+		numBytesRecv = 0;
 	}
 	
 	fclose(file);

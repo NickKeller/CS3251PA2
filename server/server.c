@@ -169,8 +169,19 @@ int get_file(char* buffer, int sizeOfBuffer, char** response){
 
 int put_file(char* buffer, int sizeOfBuffer, char** response){
 	int result = 1;
-	char* filename = calloc(strlen(buffer),sizeof(char));
-	memcpy(filename,buffer,strlen(buffer));
+	int windowSize = 0;
+	//find the space to capture the window size
+	char* posOfSpace = strchr(buffer,' ');
+	int sizeOfFileName = posOfSpace - buffer;
+	//grab the window size
+	char* windowParam = calloc(5,sizeof(char));
+	memcpy(windowParam, &buffer[sizeOfFileName+1], 5);
+	if(strncmp(&buffer[sizeOfFileName+1],"WIN:",4) == 0){
+		windowSize = atoi(&windowParam[4]);
+		if(DEBUG) printf("Window Size: %d\n",windowSize);
+	}
+	char* filename = calloc(sizeOfFileName,sizeof(char));
+	memcpy(filename,buffer,sizeOfFileName);
 	if(DEBUG) printf("File to put is: %s_blah\n",filename);
 	char* message = calloc(4 + strlen(filename),sizeof(char));
 	memcpy(message,"EOF ",4);
@@ -178,7 +189,7 @@ int put_file(char* buffer, int sizeOfBuffer, char** response){
 	*response = message;
 	
 	//time to send the file
-	char* fullpath = convert_name(buffer,"put/");
+	char* fullpath = convert_name(filename,"put/");
 	if(DEBUG) printf("Opening file:%s_blah\n",fullpath);
 	
 	//this code came from a lc3 emulator that I wrote in my CS2110 class. It was used to read an object file
@@ -188,24 +199,29 @@ int put_file(char* buffer, int sizeOfBuffer, char** response){
 		return 1;
 	}
 	//allocate space for the shorts to be read in
-	char packet[1000];
+	char packet[100];
 	int numElements = 0;
 	char bstop = 0;
 	//run the loop until end of file
 	while(!bstop){
-		//read in the starting address and number of elements
-		numElements = fread(packet, sizeof(char), 1000, file);
-		//check for EOF
-		if(numElements < 1000){
-			//EOF reached, break
-			bstop = 1;
-		}
-		//send off the file, wait for an ACK
-		int numBytesSent = sendto(connection->socket,packet,strlen(packet),0,
-							  connection->addr,connection->addrlen);
+		for(int i = 0; i < windowSize; i++){
+			//read in the starting address and number of elements
+			numElements = fread(packet, sizeof(char), 100, file);
+			//check for EOF
+			if(numElements < 100){
+				//EOF reached, break
+				bstop = 1;
+			}
+			//send off the file, wait for an ACK
+			int numBytesSent = sendto(connection->socket,packet,strlen(packet),0,
+								  connection->addr,connection->addrlen);
 		
-		if(DEBUG) printf("Num bytes sent: %d\n",numBytesSent);
-		if(DEBUG) printf("Message Sent: %s\n",packet);
+			if(DEBUG) printf("Num bytes sent: %d\n",numBytesSent);
+			if(DEBUG) printf("Message Sent: %s\n",packet);
+			bzero(packet,100);
+		}
+	
+		
 		
 		char recvBuffer[100];
 		int numBytesRecv = recvfrom(connection->socket,recvBuffer,100,0, connection->addr,&(connection->addrlen));
@@ -213,10 +229,10 @@ int put_file(char* buffer, int sizeOfBuffer, char** response){
 			if(DEBUG) printf("Received ACK\n");
 		}
 		numElements = 0;
-		bzero(packet,1000);
+		bzero(packet,100);
 		bzero(recvBuffer,100);
 	}
-	
+		
 	fclose(file);
 	return result;
 }
