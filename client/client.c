@@ -3,15 +3,33 @@
 int DEBUG;
 CONN_INFO* connection;
 int connection_set;
+char* netEmuAddr;
+char* netEmuPort;
+char* clientPort;
+int windowSize;
 
 int main(int argc, char *argv[]){
 	int opts;
+	int offset = 0;
 	if((opts = getopt(argc,argv,"d")) != -1){
 		DEBUG = 1;
+		argc -= 1;
+		offset = 1;
 	}
 	else{
 		DEBUG = 0;
 	}
+	//grab the port number to bind to, and the IP and port
+	if(argc < 3){
+		quit("Example Usage: ./fxa-client [-d] Port NetEmuAddr NetEmuPort");
+	}
+	
+	clientPort = argv[1+offset];
+	netEmuAddr = argv[2+offset];
+	netEmuPort = argv[3+offset];
+	
+	windowSize = 1;
+	
 	connection_set = 0;
 	printf("Welcome to FxA file transfer application!\nPlease enter a command:");
 	char buffer[300] = {0};
@@ -93,12 +111,28 @@ int main(int argc, char *argv[]){
 			}
 		}
 		
+		else if(strcmp(cmd,"window") == 0){
+			if(strlen(arg1) == 0){
+				printf("Example usage: window windowSize\n");
+			}
+			
+			else if(atoi(arg1) == 0 || atoi(arg1) > 5){
+				printf("Error: Window Size must be between 1 and 5\n");
+			}
+			
+			else{
+				int size = atoi(arg1);
+				windowSize = size;
+				printf("Window Size set to %d packets\n",windowSize);
+			}
+		}
+		
 		else if(strcmp(cmd,"quit") == 0){
 			quit("Goodbye!");
 		}
 		
 		else{
-			printf("Available commands are: connect,get,put,close,quit\n");
+			printf("Available commands are: connect,get,put,window,close,quit\n");
 		}
 		
 		bzero(buffer,sizeof(buffer));
@@ -116,6 +150,9 @@ int main(int argc, char *argv[]){
 int connect_to_server(char *ip, char* port){
 	//create a socket
 	connection = setup_socket(ip,port);
+	if(connection == NULL){
+		return 0;
+	}
 	//created socket, now to make data and sendto my server
 	char request[] = "REQ: Please Connect\n";
 	
@@ -186,36 +223,49 @@ int fxa_get(char* filename){
 	
 	FILE* file = fopen(filename,"wb");
 	int numBytesWritten = 0;
-	char* newFileName = calloc(1 + strlen(filename), sizeof(char));
-	memcpy(newFileName,filename,strlen(filename));
-	memcpy(&newFileName[strlen(filename)],"\n",1);
-	char* message = calloc(5 + strlen(newFileName), sizeof(char));
+	
+	char* message = calloc(12 + strlen(filename), sizeof(char));
+	char* window = calloc(7,sizeof(char));
+	char* windowsize = calloc(4,sizeof(char));
+	int bytes = snprintf(windowsize,sizeof(windowSize),"%d",windowSize);
+	printf("WindowSize: %s\nBytes:%d\n",windowsize,bytes);
 	memcpy(message,"GET: ",5);
-	memcpy(&message[5],newFileName,strlen(newFileName));
+	memcpy(&message[5],filename,strlen(filename));
+	memcpy(window," WIN:",5);
+	memcpy(&window[5],windowsize,1);
+	memcpy(&window[6],"\n",1);
+	memcpy(&message[5+strlen(filename)],window,strlen(window));
 	if(DEBUG) printf("Message is: %s\n",message);
+	
 	//send the GET message
 	int numBytesSent = sendto(connection->socket,message,strlen(message),0,
 							  connection->remote_addr,connection->addrlen);
 	if(DEBUG) printf("Num Bytes Sent: %d\n",numBytesSent);
-	char* recvBuffer = calloc(1000,sizeof(char));
+	char* recvBuffer = calloc(100,sizeof(char));
 	while(1){
-		int numBytesRecv = timeout_recvfrom(connection->socket,recvBuffer,1000,0,
-									connection->remote_addr,&(connection->addrlen),2,message);
-		if(strncmp(recvBuffer,"EOF",3) == 0){
-			if(DEBUG) printf("Reached EOF\n");
-			break;
-		}
+		int numBytesRecv = 0;
+		int numBytesWritten = 0;
+		for(int i = 0; i < windowSize;i++){
+			numBytesRecv += timeout_recvfrom(connection->socket,recvBuffer,100,0,
+										connection->remote_addr,&(connection->addrlen),2,message);
+			if(strncmp(recvBuffer,"EOF",3) == 0){
+				if(DEBUG) printf("Reached EOF\n");
+				break;
+			}
 	
-		if(DEBUG) printf("Num Bytes Recv: %d\nStrlen:%d\n",numBytesRecv,strlen(recvBuffer));
-	//	if(DEBUG) printf("Message Received: %s\n",recvBuffer);
-		//write the buffer into the file
-		numBytesWritten = fwrite(recvBuffer,sizeof(char),numBytesRecv,file);
+			if(DEBUG) printf("Num Bytes Recv: %d\nStrlen:%d\n",numBytesRecv,strlen(recvBuffer));
+		//	if(DEBUG) printf("Message Received: %s\n",recvBuffer);
+			//write the buffer into the file
+			numBytesWritten += fwrite(recvBuffer,sizeof(char),numBytesRecv,file);
+			
+		}
+		
 		if(numBytesWritten == numBytesRecv){
 			//send an ACK
 			if(DEBUG) printf("Successfully wrote %d bytes to file\n",numBytesWritten);
 			sendto(connection->socket,"ACK",3,0,connection->remote_addr,connection->addrlen);
 		}
-		bzero(recvBuffer,1000);
+		bzero(recvBuffer,100);
 		numBytesWritten = 0;
 	}
 	
@@ -328,6 +378,21 @@ CONN_INFO* setup_socket(char* host, char* port){
 		perror("Failed to find and bind a socket\n");
 		return NULL;
 	}
+	
+	struct sockaddr_in myaddr;
+	memset(&myaddr, 0, sizeof(myaddr));
+	myaddr.sin_family = AF_INET;
+	myaddr.sin_addr.s_addr = INADDR_ANY;
+	myaddr.sin_port = htons(clientPort);
+	if(DEBUG) printf("Attempting to bind on port %s\n",clientPort);
+	
+	//bind to the port number
+	int bindResult = bind(sock, (struct sockaddr *)&myaddr, sizeof(myaddr));
+	if(bindResult != 0){
+		if(DEBUG) printf("Failed to bind on port number given\n");
+		return NULL;
+	}
+	
 	CONN_INFO* conn_info = malloc(sizeof(CONN_INFO));
 	conn_info->socket = sock;
 	conn_info->remote_addr = conn->ai_addr;
@@ -383,6 +448,7 @@ int timeout_recvfrom (int sock, char *buf, int bufSize, int flags, struct sockad
     numBytesRecv = recvfrom(sock, buf, bufSize, 0, connection, addrlen);
     if (numBytesRecv !=-1)
         {
+      // if(DEBUG) printf("Port Received From:%d\nIP Received From:%d\n",(struct sockaddr_in *)(connection)->sin_port,inet_ntoa((struct sockaddr_in *)(connection)->sin_addr));
         return numBytesRecv;
         }
     else
