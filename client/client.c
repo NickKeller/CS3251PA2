@@ -3,8 +3,7 @@
 int DEBUG;
 CONN_INFO* connection;
 int connection_set;
-char* netEmuAddr;
-char* netEmuPort;
+
 char* clientPort;
 int windowSize;
 
@@ -25,9 +24,31 @@ int main(int argc, char *argv[]){
 	}
 	
 	clientPort = argv[1+offset];
-	netEmuAddr = argv[2+offset];
-	netEmuPort = argv[3+offset];
+	char* netEmuAddr = argv[2+offset];
+	char* netEmuPort = argv[3+offset];
 	
+	if(atoi(clientPort) % 2 != 0){
+		quit("Error, the port number to bind to must be an even number");
+	}	
+	//create a socket
+	connection = setup_socket(netEmuAddr,netEmuPort);
+	if(DEBUG) printf("Attempting to bind on port %s\n",clientPort);
+	
+	//bind to the port number
+	struct sockaddr_in myaddr;
+	memset(&myaddr, 0, sizeof(myaddr));
+	myaddr.sin_family = AF_INET;
+	myaddr.sin_addr.s_addr = INADDR_ANY;
+	myaddr.sin_port = htons(clientPort);
+	int bindResult = bind(connection->socket, (struct sockaddr*)&myaddr, connection->addrlen);
+	if(bindResult != 0){
+		if(DEBUG) perror("Failed to bind on port number given\n");
+		exit(0);
+	}
+	if(connection == NULL){
+		return 0;
+	}
+	//default window size of 1
 	windowSize = 1;
 	
 	connection_set = 0;
@@ -44,19 +65,13 @@ int main(int argc, char *argv[]){
 				printf("You already have an open connection. Please close that one before opening a new connection\n");
 			}
 			else{
-				char* colon = strchr(buffer,':');
-				if(colon != NULL || strlen(arg2) == 0 || strlen(arg1) == 0){
-					printf("Example usage: 127.0.0.1 5000\n");
+				if(DEBUG) printf("IP:%s\nPort:%s\n",netEmuAddr,netEmuPort);
+				printf("Connecting to server...");
+				if(connect_to_server()){
+					printf("Done!\n");
 				}
 				else{
-					if(DEBUG) printf("IP:%s\nPort:%s\n",arg1,arg2);
-					printf("Connecting to server...");
-					if(connect_to_server(arg1,arg2)){
-						printf("Done!\n");
-					}
-					else{
-						printf("Could not connect to server. Please try again later");
-					}
+					printf("Could not connect to server. Please try again later");
 				}
 			}
 		}
@@ -147,13 +162,8 @@ int main(int argc, char *argv[]){
 }
 
 
-int connect_to_server(char *ip, char* port){
-	//create a socket
-	connection = setup_socket(ip,port);
-	if(connection == NULL){
-		return 0;
-	}
-	//created socket, now to make data and sendto my server
+int connect_to_server(){
+	
 	char request[] = "REQ: Please Connect\n";
 	
 	int retval = -1;
@@ -390,20 +400,7 @@ CONN_INFO* setup_socket(char* host, char* port){
 		return NULL;
 	}
 	
-	struct sockaddr_in myaddr;
-	memset(&myaddr, 0, sizeof(myaddr));
-	myaddr.sin_family = AF_INET;
-	myaddr.sin_addr.s_addr = INADDR_ANY;
-	myaddr.sin_port = htons(clientPort);
-	if(DEBUG) printf("Attempting to bind on port %s\n",clientPort);
-	
-	//bind to the port number
-	int bindResult = bind(sock, (struct sockaddr *)&myaddr, sizeof(myaddr));
-	if(bindResult != 0){
-		if(DEBUG) printf("Failed to bind on port number given\n");
-		return NULL;
-	}
-	
+		
 	CONN_INFO* conn_info = malloc(sizeof(CONN_INFO));
 	conn_info->socket = sock;
 	conn_info->remote_addr = conn->ai_addr;

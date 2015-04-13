@@ -25,7 +25,7 @@ int main(int argc, char *argv[]){
 		DEBUG = 0;
 	}
 
-	//must have one argument - the port number
+	//must have 3 arguments - the port number to bind to, the ip address and port of NetEmu
 	if(argc < (2+offset)){
 		print_use_and_exit();
 	}
@@ -36,6 +36,11 @@ int main(int argc, char *argv[]){
 	current_client = calloc(1,sizeof(CLIENT));
 	challenge = calloc(64,sizeof(char));
 	int port = atoi(argv[1+offset]);
+	//only accept odd port numbers
+	if(port % 2 != 1){
+		printf("Error, must use odd port number\n");
+		print_use_and_exit();
+	}
 	//create a socket to bind on
 
 	//I got this from: https://www.cs.rutgers.edu/~pxk/417/notes/sockets/udp.html
@@ -96,7 +101,7 @@ int main(int argc, char *argv[]){
 }
 
 void print_use_and_exit(){
-	fprintf(stderr,"Usage:  server-udp [-d] port\n\n");
+	fprintf(stderr,"Usage:  server-udp [-d] port NetEmuAddr NetEmuPort\n\n");
 	exit (EXIT_FAILURE);
 }
 

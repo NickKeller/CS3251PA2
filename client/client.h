@@ -22,7 +22,7 @@ typedef struct _CONN_INFO{
 void print_use_and_exit(void);
 CONN_INFO* setup_socket(char* host, char* port);
 char* doMD5(char* buffer);
-int connect_to_server(char* ip, char* port);
+int connect_to_server();
 int fxa_get(char* filename);
 int fxa_put(char* filename);
 int fxa_close(void);
