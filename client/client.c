@@ -254,7 +254,13 @@ int fxa_get(char* filename){
 	int numBytesSent = sendto(connection->socket,message,strlen(message),0,
 							  connection->remote_addr,connection->addrlen);
 	if(DEBUG) printf("Num Bytes Sent: %d\n",numBytesSent);
+	
+	//wait for the ACK from the server before preparing to receive files
 	char* recvBuffer = calloc(100,sizeof(char));
+	int AckBytesReceived = timeout_recvfrom(connection->socket,recvBuffer,100,0,connection->remote_addr,&(connection->addrlen),2,message,5,1);
+	
+	
+	
 	int eof = 0;
 	while(!eof){
 		int numBytesRecvTotal = 0;

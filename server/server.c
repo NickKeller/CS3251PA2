@@ -203,6 +203,13 @@ int put_file(char* buffer, int sizeOfBuffer, char** response){
 		*response = "Error, file doesn't exist!\n";
 		return 1;
 	}
+	
+	//send an ACK confirming the window size
+	char* windowSizeAck = calloc(7,sizeof(char));
+	snprintf(windowSizeAck,7,"ACK: %d\n",windowSize);
+	sendto(connection->socket,windowSizeAck,strlen(windowSizeAck),0,
+								  connection->addr,connection->addrlen);
+	
 	//allocate space for the shorts to be read in
 	char packet[100];
 	int numElements = 0;
@@ -213,19 +220,20 @@ int put_file(char* buffer, int sizeOfBuffer, char** response){
 			//read in the starting address and number of elements
 			numElements = fread(packet, sizeof(char), 100, file);
 			
-			char* message = calloc(112,sizeof(char));
+			char* fullMessage = calloc(112,sizeof(char));
 			//check for EOF
 			if(numElements < 100){
 				//EOF reached, break
 				if(DEBUG) printf("Found EOF, setting bstop to 1\nSending last part of file\n");
 				bstop = 1;
+				add_header_info((short)i,(char)112,LST, packet,&fullMessage);
 			}
 			
 			else{
-				add_header_info((short)i,(char)112,DTA, packet,&message);
+				add_header_info((short)i,(char)112,DTA, packet,&fullMessage);
 			}
 			//send off the file, wait for an ACK
-			int numBytesSent = sendto(connection->socket,packet,strlen(packet),0,
+			int numBytesSent = sendto(connection->socket,fullMessage,strlen(fullMessage),0,
 								  connection->addr,connection->addrlen);
 		
 			if(DEBUG) printf("Num bytes sent: %d\n",numBytesSent);
@@ -395,5 +403,57 @@ char* convert_name(char* filename, char* prefix){
 }
 
 void add_header_info(short packet_num,char num_bytes, char msg_type, char* packet, char** message){
+	char bytes = num_bytes;
+	char* firstPart = calloc(4,sizeof(char));
+	if(DEBUG) printf("Num Bytes to Hash:%d\n",4+atoi(&bytes));
+	char* totalToHash = calloc(4+atoi(&bytes),sizeof(char));
 	
+	//split up packet_num into chars
+	char upperPacketNum = (char)(packet_num>>8);
+	char lowerPacketNum = (char)(packet_num);
+	
+	//copy packet_num,num_bytes,and msg_type into firstPart
+	firstPart[0] = upperPacketNum;
+	firstPart[1] = lowerPacketNum;
+	firstPart[2] = num_bytes;
+	firstPart[3] = msg_type;
+	
+	//join firstPart and packet and hand it off to the md5 function
+	memcpy(totalToHash,firstPart,4);
+	memcpy(&totalToHash,packet,strlen(packet));
+	
+	char* md5_res = md5(totalToHash,strlen(totalToHash));
+	
+	char* checksum = calloc(8,sizeof(char));
+	memcpy(checksum,md5_res,8);
+	
+	memcpy(*message,firstPart,4);
+	memcpy(message[4],checksum,8);
+	memcpy(message[12],packet,strlen(packet));
+	if(DEBUG) printf("Message is:%s\n",*message);
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
