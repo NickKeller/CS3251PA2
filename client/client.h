@@ -18,6 +18,17 @@ typedef struct _CONN_INFO{
 	struct sockaddr *remote_addr;
 } CONN_INFO;
 
+//Message Type Definitions
+#define REQ '0'
+#define CHA '1'
+#define RES '2'
+#define ACK '3'
+#define NAK '4'
+#define DTA '5'
+#define LST '6'
+#define EFI '7'
+#define FIN '8'
+
 //function declarations
 void print_use_and_exit(void);
 CONN_INFO* setup_socket(char* host, char* port);

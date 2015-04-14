@@ -212,15 +212,19 @@ int put_file(char* buffer, int sizeOfBuffer, char** response){
 		for(int i = 0; i < windowSize; i++){
 			//read in the starting address and number of elements
 			numElements = fread(packet, sizeof(char), 100, file);
+			
+			char* message = calloc(112,sizeof(char));
 			//check for EOF
 			if(numElements < 100){
 				//EOF reached, break
 				if(DEBUG) printf("Found EOF, setting bstop to 1\nSending last part of file\n");
 				bstop = 1;
 			}
+			
+			else{
+				add_header_info((short)i,(char)112,DTA, packet,&message);
+			}
 			//send off the file, wait for an ACK
-			char* message = calloc(112,sizeof(char));
-			add_header_info((short)i,(char)112,DTA, packet,*message);
 			int numBytesSent = sendto(connection->socket,packet,strlen(packet),0,
 								  connection->addr,connection->addrlen);
 		

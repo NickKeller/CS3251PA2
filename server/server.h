@@ -35,7 +35,7 @@ typedef struct _CLIENT{
 #define NAK '4'
 #define DTA '5'
 #define LST '6'
-#define EOF '7'
+#define EFI '7'
 #define FIN '8'
 
 //function declarations
