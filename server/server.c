@@ -101,7 +101,7 @@ int main(int argc, char *argv[]){
 }
 
 void print_use_and_exit(){
-	fprintf(stderr,"Usage:  server-udp [-d] port NetEmuAddr NetEmuPort\n\n");
+	fprintf(stderr,"Usage:  fxa-server [-d] port\n\n");
 	exit (EXIT_FAILURE);
 }
 
@@ -149,7 +149,7 @@ int get_file(char* buffer, int sizeOfBuffer, char** response){
 	int numBytesWritten = 0;
 	while(1){
 		int numBytesRecv = timeout_recvfrom(connection->socket,recvBuffer,1000,0,
-									connection->addr,&(connection->addrlen),2,"ACK");
+									connection->addr,&(connection->addrlen),2,"ACK",5,1);
 		if(strncmp(recvBuffer,"EOF",3) == 0){
 			if(DEBUG) printf("Reached EOF\n");
 			break;
@@ -215,26 +215,27 @@ int put_file(char* buffer, int sizeOfBuffer, char** response){
 			//check for EOF
 			if(numElements < 100){
 				//EOF reached, break
+				if(DEBUG) printf("Found EOF, setting bstop to 1\nSending last part of file\n");
 				bstop = 1;
 			}
 			//send off the file, wait for an ACK
+			char* message = calloc(112,sizeof(char));
+			add_header_info((short)i,(char)112,DTA, packet,*message);
 			int numBytesSent = sendto(connection->socket,packet,strlen(packet),0,
 								  connection->addr,connection->addrlen);
 		
 			if(DEBUG) printf("Num bytes sent: %d\n",numBytesSent);
-			if(DEBUG) printf("Message Sent: %s\n",packet);
+			//if(DEBUG) printf("Message Sent: %s\n",packet);
 			bzero(packet,100);
+			if(bstop) break;
 		}
-	
-		
-		
+		if(DEBUG) printf("Waiting on ACK\n");
 		char recvBuffer[100];
 		int numBytesRecv = recvfrom(connection->socket,recvBuffer,100,0, connection->addr,&(connection->addrlen));
 		if(strncmp(recvBuffer,"ACK",3) == 0){
 			if(DEBUG) printf("Received ACK\n");
 		}
 		numElements = 0;
-		bzero(packet,100);
 		bzero(recvBuffer,100);
 	}
 		
@@ -338,7 +339,7 @@ void figureOutClient(struct sockaddr_in remaddr){
 	}
 }
 
-int timeout_recvfrom (int sock, char *buf, int bufSize, int flags, struct sockaddr *connection, socklen_t *addrlen,int timeoutinseconds,char* messageToSend)
+int timeout_recvfrom (int sock, char *buf, int bufSize, int flags, struct sockaddr *connection, socklen_t *addrlen,int timeoutinseconds,char* messageToSend, int numIter, int resend)
 {
     fd_set socks;
     struct timeval t;
@@ -352,21 +353,23 @@ int timeout_recvfrom (int sock, char *buf, int bufSize, int flags, struct sockad
     while(select(sock + 1, &socks, NULL, NULL, &t) <= 0){
     	//timeout, send again
     	tries++;
-    	//don't try more than 5 times
-    	if(tries == 5){
+    	//don't try more than numIter times
+    	if(tries == numIter){
 	    	return -1;
     	}
-    	if(DEBUG) printf("Connection Timeout - Trying again\n");
-    	t.tv_sec = timeoutinseconds;
-    	int res = 0;
-    	while(res <= 0){
-    		res = sendto(sock,messageToSend,strlen(messageToSend),0,connection,*addrlen);
-			if(DEBUG) printf("Sent %d bytes\n",res);
-			if(res == -1){
-				printf("Error\n");
-			}    		
-    	}
-    	if(DEBUG) printf("Done Sending\n");
+    	if(resend){
+			if(DEBUG) printf("Connection Timeout - Trying again\n");
+			t.tv_sec = timeoutinseconds;
+			int res = 0;
+			while(res <= 0){
+				res = sendto(sock,messageToSend,strlen(messageToSend),0,connection,*addrlen);
+				if(DEBUG) printf("Sent %d bytes\n",res);
+				if(res == -1){
+					printf("Error\n");
+				}    		
+			}
+			if(DEBUG) printf("Done Sending\n");
+		}
     	FD_ZERO(&socks);
 	    FD_SET(sock, &socks);
     }
@@ -385,4 +388,8 @@ char* convert_name(char* filename, char* prefix){
 	memcpy(fullpath,prefix,4);
 	memcpy(&fullpath[4],filename,strlen(filename));
 	return fullpath;
+}
+
+void add_header_info(short packet_num,char num_bytes, char msg_type, char* packet, char** message){
+	
 }

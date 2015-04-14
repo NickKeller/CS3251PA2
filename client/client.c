@@ -39,7 +39,7 @@ int main(int argc, char *argv[]){
 	memset(&myaddr, 0, sizeof(myaddr));
 	myaddr.sin_family = AF_INET;
 	myaddr.sin_addr.s_addr = INADDR_ANY;
-	myaddr.sin_port = htons(clientPort);
+	myaddr.sin_port = htons(atoi(clientPort));
 	int bindResult = bind(connection->socket, (struct sockaddr*)&myaddr, connection->addrlen);
 	if(bindResult != 0){
 		if(DEBUG) perror("Failed to bind on port number given\n");
@@ -71,7 +71,7 @@ int main(int argc, char *argv[]){
 					printf("Done!\n");
 				}
 				else{
-					printf("Could not connect to server. Please try again later");
+					printf("Could not connect to server. Please try again later\n");
 				}
 			}
 		}
@@ -143,6 +143,9 @@ int main(int argc, char *argv[]){
 		}
 		
 		else if(strcmp(cmd,"quit") == 0){
+			if(connection_set){
+				fxa_close();
+			}
 			quit("Goodbye!");
 		}
 		
@@ -175,7 +178,7 @@ int connect_to_server(){
 	char recvBuffer[100];
 	int size = sizeof(recvBuffer);
 	int numBytesRecv = timeout_recvfrom(connection->socket,recvBuffer,size,0,
-								connection->remote_addr,&(connection->addrlen),2,request);
+								connection->remote_addr,&(connection->addrlen),2,request,5,1);
 	if(numBytesRecv == -1){
 		return 0;
 	}
@@ -213,7 +216,7 @@ int connect_to_server(){
 	//wait for a response
 	memset(recvBuffer,0,100);
 	numBytesRecv = timeout_recvfrom(connection->socket,recvBuffer,sizeof(recvBuffer),0,
-								connection->remote_addr,&(connection->addrlen),2,respBuffer);
+								connection->remote_addr,&(connection->addrlen),2,respBuffer,5,1);
 	if(numBytesRecv == -1){
 		return 0;
 	}
@@ -258,7 +261,8 @@ int fxa_get(char* filename){
 		int numBytesWrittenTotal = 0;
 		for(int i = 0; i < windowSize;i++){
 			int numBytesRecv = timeout_recvfrom(connection->socket,recvBuffer,100,0,
-										connection->remote_addr,&(connection->addrlen),2,message);
+										connection->remote_addr,&(connection->addrlen),2,message,1,0);
+			if(DEBUG) printf("Received %d Bytes\n",numBytesRecv),
 			numBytesRecvTotal += numBytesRecv;
 			if(strncmp(recvBuffer,"EOF",3) == 0){
 				if(DEBUG) printf("Reached EOF\n");
@@ -266,12 +270,12 @@ int fxa_get(char* filename){
 				break;
 			}
 	
-			if(DEBUG) printf("Num Bytes Recv: %d\nStrlen:%d\n",numBytesRecvTotal,strlen(recvBuffer));
+			if(DEBUG) printf("Num Bytes Recv Total: %d\n",numBytesRecvTotal);
 		//	if(DEBUG) printf("Message Received: %s\n",recvBuffer);
 			//write the buffer into the file
 			int numBytesWritten = fwrite(recvBuffer,sizeof(char),numBytesRecv,file);
 			numBytesWrittenTotal += numBytesWritten;
-			if(DEBUG) printf("Num Bytes Written: %d\n",numBytesWrittenTotal);
+			if(DEBUG) printf("Num Bytes Written Total: %d\n",numBytesWrittenTotal);
 			
 		}
 		
@@ -420,7 +424,7 @@ char* doMD5(char* buffer){
 }
 
 
-int timeout_recvfrom (int sock, char *buf, int bufSize, int flags, struct sockaddr *connection, socklen_t *addrlen,int timeoutinseconds,char* messageToSend)
+int timeout_recvfrom (int sock, char *buf, int bufSize, int flags, struct sockaddr *connection, socklen_t *addrlen,int timeoutinseconds,char* messageToSend, int numIter, int resend)
 {
     fd_set socks;
     struct timeval t;
@@ -434,21 +438,23 @@ int timeout_recvfrom (int sock, char *buf, int bufSize, int flags, struct sockad
     while(select(sock + 1, &socks, NULL, NULL, &t) <= 0){
     	//timeout, send again
     	tries++;
-    	//don't try more than 5 times
-    	if(tries == 5){
+    	//don't try more than numIter times
+    	if(tries == numIter){
 	    	return -1;
     	}
-    	if(DEBUG) printf("Connection Timeout - Trying again\n");
-    	t.tv_sec = timeoutinseconds;
-    	int res = 0;
-    	while(res <= 0){
-    		res = sendto(sock,messageToSend,strlen(messageToSend),0,connection,*addrlen);
-			if(DEBUG) printf("Sent %d bytes\n",res);
-			if(res == -1){
-				printf("Error\n");
-			}    		
-    	}
-    	if(DEBUG) printf("Done Sending\n");
+    	if(resend){
+			if(DEBUG) printf("Connection Timeout - Trying again\n");
+			t.tv_sec = timeoutinseconds;
+			int res = 0;
+			while(res <= 0){
+				res = sendto(sock,messageToSend,strlen(messageToSend),0,connection,*addrlen);
+				if(DEBUG) printf("Sent %d bytes\n",res);
+				if(res == -1){
+					printf("Error\n");
+				}    		
+			}
+			if(DEBUG) printf("Done Sending\n");
+		}
     	FD_ZERO(&socks);
 	    FD_SET(sock, &socks);
     }

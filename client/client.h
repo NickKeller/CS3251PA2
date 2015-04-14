@@ -28,6 +28,6 @@ int fxa_put(char* filename);
 int fxa_close(void);
 char* convert_name(char* filename, char* prefix);
 unsigned *md5( const char *msg, int mlen);
-int timeout_recvfrom (int sock, char *buf, int bufSize, int flags, struct sockaddr *connection, socklen_t *addrlen,int timeoutinseconds,char* messageToSend);
+int timeout_recvfrom (int sock, char *buf, int bufSize, int flags, struct sockaddr *connection, socklen_t *addrlen,int timeoutinseconds,char* messageToSend, int numIter, int resend);
 void quit(char* message);
 #endif//end udp-client.h
