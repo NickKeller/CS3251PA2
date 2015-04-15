@@ -27,16 +27,6 @@ typedef struct _CLIENT{
 	char challenge[64];
 } CLIENT;
 
-//Message Type Definitions
-#define REQ '0'
-#define CHA '1'
-#define RES '2'
-#define ACK '3'
-#define NAK '4'
-#define DTA '5'
-#define LST '6'
-#define EFI '7'
-#define FIN '8'
 
 //function declarations
 void print_use_and_exit(void);
@@ -45,9 +35,10 @@ int process_response(char *buffer, int sizeOfBuffer, char ** response);
 int process_request(char *buffer, int sizeOfBuffer, char ** response);
 int put_file(char* buffer, int sizeOfBuffer, char** response);
 int get_file(char* buffer, int sizeOfBuffer, char** response);
+int close_connection(char* buffer,char** response);
 char* convert_name(char* filename, char* prefix);
 int timeout_recvfrom (int sock, char *buf, int bufSize, int flags, struct sockaddr *connection, socklen_t *addrlen,int timeoutinseconds,char* messageToSend, int numIter, int resend);
-void add_header_info(short packet_num,char num_bytes, char msg_type, char* packet, char** message);
+char* add_header_info(short packet_num,char num_bytes, char msg_type, char* packet);
 char * generate_string(void);
 char* doMD5(char* buffer);
 unsigned *md5( const char *msg, int mlen);

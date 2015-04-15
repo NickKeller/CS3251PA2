@@ -1,18 +1,24 @@
 #include "server.h"
 
-//usernames and passwords
-char *usernames[] = {"user1","user2","user3"};
-char *passwords[] = {"pass1","pass2","pass3"};
-
 CLIENT* client1;
 CLIENT* client2;
 CLIENT* current_client;
 CONN_INFO *connection;
-char* REQ_MSG = "REQ";
-char* RES_MSG = "RES";
 
 int DEBUG;
 char *challenge;
+
+//Message Type Definitions
+char type_REQ = (char)0;
+char type_CHA = (char)1;
+char type_RES = (char)2;
+char type_ACK = (char)3;
+char type_NAK = (char)4;
+char type_DTA = (char)5;
+char type_LST = (char)6;
+char type_EFI = (char)7;
+char type_FIN = (char)8;
+
 
 int main(int argc, char *argv[]){
 	
@@ -25,7 +31,6 @@ int main(int argc, char *argv[]){
 		DEBUG = 0;
 	}
 
-	//must have 3 arguments - the port number to bind to, the ip address and port of NetEmu
 	if(argc < (2+offset)){
 		print_use_and_exit();
 	}
@@ -129,6 +134,9 @@ int process(char* message,int sizeOfBuffer, int port, char ** response){
 		if(strncmp(buffer,"PUT",3) == 0){
 			return get_file(&buffer[5],posOfNewLine,response);
 		}
+		if(strncmp(buffer,"FIN",3) == 0){
+			return close_connection(buffer,response);
+		}
 		return 1;
 	}
 	else{
@@ -188,9 +196,11 @@ int put_file(char* buffer, int sizeOfBuffer, char** response){
 	char* filename = calloc(sizeOfFileName,sizeof(char));
 	memcpy(filename,buffer,sizeOfFileName);
 	if(DEBUG) printf("File to put is: %s_blah\n",filename);
-	char* message = calloc(4 + strlen(filename),sizeof(char));
-	memcpy(message,"EOF ",4);
-	memcpy(&message[4],filename,strlen(filename));
+	char* temp = calloc(4 + strlen(filename),sizeof(char));
+	memcpy(temp,"EOF ",4);
+	memcpy(&temp[4],filename,strlen(filename));
+	
+	char* message = add_header_info((short)0,(char)112,type_EFI, temp);
 	*response = message;
 	
 	//time to send the file
@@ -216,43 +226,68 @@ int put_file(char* buffer, int sizeOfBuffer, char** response){
 	char bstop = 0;
 	//run the loop until end of file
 	while(!bstop){
+		//buffer up the packets
+		char* packetArray[windowSize];
+		for(int i = 0; i < windowSize; i++){
+			packetArray[i] = "0";
+		}
+		int numPacketsCreated = 0;
 		for(int i = 0; i < windowSize; i++){
 			//read in the starting address and number of elements
 			numElements = fread(packet, sizeof(char), 100, file);
-			
-			char* fullMessage = calloc(112,sizeof(char));
+		
 			//check for EOF
 			if(numElements < 100){
 				//EOF reached, break
 				if(DEBUG) printf("Found EOF, setting bstop to 1\nSending last part of file\n");
 				bstop = 1;
-				add_header_info((short)i,(char)112,LST, packet,&fullMessage);
+				packetArray[i] = add_header_info((short)i,(char)112,type_LST, packet);
 			}
-			
-			else{
-				add_header_info((short)i,(char)112,DTA, packet,&fullMessage);
-			}
-			//send off the file, wait for an ACK
-			int numBytesSent = sendto(connection->socket,fullMessage,strlen(fullMessage),0,
-								  connection->addr,connection->addrlen);
 		
-			if(DEBUG) printf("Num bytes sent: %d\n",numBytesSent);
-			//if(DEBUG) printf("Message Sent: %s\n",packet);
+			else{
+				packetArray[i] = add_header_info((short)i,(char)112,type_DTA, packet);
+			}
+			numPacketsCreated++;
 			bzero(packet,100);
 			if(bstop) break;
 		}
-		if(DEBUG) printf("Waiting on ACK\n");
-		char recvBuffer[100];
-		int numBytesRecv = recvfrom(connection->socket,recvBuffer,100,0, connection->addr,&(connection->addrlen));
-		if(strncmp(recvBuffer,"ACK",3) == 0){
-			if(DEBUG) printf("Received ACK\n");
+		
+		//send off the packets
+		int recvAck = 0;
+		while(recvAck == 0){
+			for(int i = 0; i < numPacketsCreated; i++){
+				char* message = packetArray[i];
+				int numBytesSent = sendto(connection->socket,message,
+											strlen(message),0,
+											connection->addr,connection->addrlen);
+		
+				if(DEBUG) printf("Num bytes sent: %d\n",numBytesSent);
+				//if(DEBUG) printf("Message Sent: %s\n",packet);
+				
+			}
+			if(DEBUG) printf("Waiting on ACK\n");
+			char recvBuffer[100] = {0};
+			int numBytesRecv = recvfrom(connection->socket,recvBuffer,100,0, connection->addr,&(connection->addrlen));
+			if(strncmp(recvBuffer,"ACK",3) == 0){
+				if(DEBUG) printf("Received ACK\n");
+				recvAck = 1;
+			}
+			else{
+				if(DEBUG) printf("Received NAK\n");
+			}
+			numElements = 0;
+			bzero(recvBuffer,100);
 		}
-		numElements = 0;
-		bzero(recvBuffer,100);
 	}
 		
 	fclose(file);
 	return result;
+}
+
+int close_connection(char* buffer, char** response){
+	//send an ACK
+	*response = "ACK\n";
+	return 1;
 }
 
 int process_response(char *buffer, int sizeOfBuffer, char ** response){
@@ -402,58 +437,46 @@ char* convert_name(char* filename, char* prefix){
 	return fullpath;
 }
 
-void add_header_info(short packet_num,char num_bytes, char msg_type, char* packet, char** message){
-	char bytes = num_bytes;
+char* add_header_info(short packet_num,char num_bytes, char msg_type, char* packet){
+	printf("Packet_num:%d\nNum_Bytes:%d\nMsg_Type:%d\n",packet_num,num_bytes,msg_type);
 	char* firstPart = calloc(4,sizeof(char));
-	if(DEBUG) printf("Num Bytes to Hash:%d\n",4+atoi(&bytes));
-	char* totalToHash = calloc(4+atoi(&bytes),sizeof(char));
+	if(DEBUG) printf("Num Bytes to Hash:%d\n",4+strlen(packet));
 	
+	char* totalToHash = calloc(4+strlen(packet),sizeof(char));
+	
+	if(DEBUG) printf("Splitting packet num\n");
 	//split up packet_num into chars
 	char upperPacketNum = (char)(packet_num>>8);
 	char lowerPacketNum = (char)(packet_num);
+	if(DEBUG) printf("Upper Packet Num:%d\nLower Packet Num:%d\n",upperPacketNum,lowerPacketNum);
 	
+	if(DEBUG) printf("Loading first part of header\n");
 	//copy packet_num,num_bytes,and msg_type into firstPart
-	firstPart[0] = upperPacketNum;
-	firstPart[1] = lowerPacketNum;
-	firstPart[2] = num_bytes;
-	firstPart[3] = msg_type;
-	
+	sprintf(&firstPart[0],"%d",upperPacketNum);
+	sprintf(&firstPart[1],"%d",lowerPacketNum);
+	sprintf(&firstPart[2],"%d",num_bytes);
+	sprintf(&firstPart[3],"%d",msg_type);
+	if(DEBUG) printf("Loading second part of header\nFirstPart:%s_blah\nPacket:%s_blah\n",firstPart,packet);
 	//join firstPart and packet and hand it off to the md5 function
 	memcpy(totalToHash,firstPart,4);
-	memcpy(&totalToHash,packet,strlen(packet));
+	memcpy(&totalToHash[4],packet,strlen(packet));
 	
-	char* md5_res = md5(totalToHash,strlen(totalToHash));
-	
+	if(DEBUG) printf("Doing MD5\nHashing: %s\n",totalToHash);
+	char* md5_res = md5(totalToHash,4+strlen(packet));
+	printf("MD5 returned:%s\n",md5_res);
 	char* checksum = calloc(8,sizeof(char));
 	memcpy(checksum,md5_res,8);
 	
-	memcpy(*message,firstPart,4);
-	memcpy(message[4],checksum,8);
-	memcpy(message[12],packet,strlen(packet));
-	if(DEBUG) printf("Message is:%s\n",*message);
+	if(DEBUG) printf("Putting Message together\n");
+	char* message = calloc(112,sizeof(char));
+	//double checking
+	printf("Adjusted MD5:%s\n",checksum);
+	
+	memcpy(message,firstPart,4);
+	if(DEBUG) printf("Message is:%s\n",message);
+	memcpy(&message[4],checksum,8);
+	if(DEBUG) printf("Message is:%s\n",message);
+	memcpy(&message[12],packet,strlen(packet));
+	if(DEBUG) printf("Message is:%s\n",message);
+	return message;
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

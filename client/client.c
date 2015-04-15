@@ -7,6 +7,18 @@ int connection_set;
 char* clientPort;
 int windowSize;
 
+//Message Type Definitions
+char type_REQ = (char)0;
+char type_CHA = (char)1;
+char type_RES = (char)2;
+char type_ACK = (char)3;
+char type_NAK = (char)4;
+char type_DTA = (char)5;
+char type_LST = (char)6;
+char type_EFI = (char)7;
+char type_FIN = (char)8;
+
+
 int main(int argc, char *argv[]){
 	int opts;
 	int offset = 0;
@@ -90,7 +102,7 @@ int main(int argc, char *argv[]){
 			}
 			
 			else{
-				printf("Could not upload file\n");
+				printf("Could not download file\n");
 			}
 		}
 		
@@ -108,7 +120,7 @@ int main(int argc, char *argv[]){
 			}
 			
 			else{
-				printf("Could not download file\n");
+				printf("Could not upload file\n");
 			}
 		}
 		
@@ -120,8 +132,6 @@ int main(int argc, char *argv[]){
 			else{
 				if(fxa_close()){
 					printf("Connection successfully closed\n");
-					connection_set = 0;
-					bzero(connection,sizeof(CONN_INFO));
 				}
 			}
 		}
@@ -242,12 +252,15 @@ int fxa_get(char* filename){
 	char* windowsize = calloc(4,sizeof(char));
 	int bytes = snprintf(windowsize,sizeof(windowSize),"%d",windowSize);
 	printf("WindowSize: %s\nBytes:%d\n",windowsize,bytes);
+	
+	//string concatenation,yay!....
 	memcpy(message,"GET: ",5);
 	memcpy(&message[5],filename,strlen(filename));
 	memcpy(window," WIN:",5);
 	memcpy(&window[5],windowsize,1);
 	memcpy(&window[6],"\n",1);
 	memcpy(&message[5+strlen(filename)],window,strlen(window));
+	
 	if(DEBUG) printf("Message is: %s\n",message);
 	
 	//send the GET message
@@ -256,43 +269,113 @@ int fxa_get(char* filename){
 	if(DEBUG) printf("Num Bytes Sent: %d\n",numBytesSent);
 	
 	//wait for the ACK from the server before preparing to receive files
-	char* recvBuffer = calloc(100,sizeof(char));
-	int AckBytesReceived = timeout_recvfrom(connection->socket,recvBuffer,100,0,connection->remote_addr,&(connection->addrlen),2,message,5,1);
-	
-	
-	
+	char* recvBuffer = calloc(112,sizeof(char));
+	if(DEBUG) printf("Waiting for ACK\n");
+	int AckBytesReceived = timeout_recvfrom(connection->socket,recvBuffer,112,0,connection->remote_addr,&(connection->addrlen),2,message,5,1);
+	if(DEBUG) printf("Received an ACK?\n");
+	if(strncmp("ACK",recvBuffer,3) != 0){
+		printf("Error, file does not exist on the server!\n");
+		return 0;
+	}
+	if(DEBUG) printf("ACK received, starting download\n");
 	int eof = 0;
+	int bitError = 0;
 	while(!eof){
 		int numBytesRecvTotal = 0;
 		int numBytesWrittenTotal = 0;
-		for(int i = 0; i < windowSize;i++){
-			int numBytesRecv = timeout_recvfrom(connection->socket,recvBuffer,100,0,
-										connection->remote_addr,&(connection->addrlen),2,message,1,0);
-			if(DEBUG) printf("Received %d Bytes\n",numBytesRecv),
-			numBytesRecvTotal += numBytesRecv;
-			if(strncmp(recvBuffer,"EOF",3) == 0){
-				if(DEBUG) printf("Reached EOF\n");
-				eof = 1;
-				break;
-			}
-	
-			if(DEBUG) printf("Num Bytes Recv Total: %d\n",numBytesRecvTotal);
-		//	if(DEBUG) printf("Message Received: %s\n",recvBuffer);
-			//write the buffer into the file
-			int numBytesWritten = fwrite(recvBuffer,sizeof(char),numBytesRecv,file);
-			numBytesWrittenTotal += numBytesWritten;
-			if(DEBUG) printf("Num Bytes Written Total: %d\n",numBytesWrittenTotal);
-			
+		int numBytesRecv = 0;
+		int numPacketsRecv = 0;
+		char* packetArray[windowSize];
+		for(int i = 0; i < windowSize; i++){
+			packetArray[i] = NULL;
 		}
+		for(int i = 0; i < windowSize; i++){
+			numBytesRecv = recvfrom(connection->socket,
+											recvBuffer,112,0,
+											connection->remote_addr,
+											&(connection->addrlen));
+										
+			//check if any bits were corrupted
+			if(goodMessage(recvBuffer)){
+				numPacketsRecv++;
+				if(DEBUG) printf("Good message\n");
+				//split the message
+				char* firstPart = calloc(4,sizeof(char));
+				memcpy(firstPart,recvBuffer,4);
+				printf("FirstPart:%s\n",firstPart);
+				char* charUpperPacketNum = calloc(1,sizeof(char));
+				char* charLowerPacketNum = calloc(1,sizeof(char));
+				char* messageType = calloc(1,sizeof(char));
+				
+				memcpy(charUpperPacketNum,&firstPart[0],1);
+				memcpy(charLowerPacketNum,&firstPart[1],1);
+				memcpy(messageType,&firstPart[3],1);
+				
+				short upperPacketNum = (short)(atoi(charUpperPacketNum)) << 8;
+				short lowerPacketNum = (short)(atoi(charLowerPacketNum));
+				printf("UpperNum:%d\nLowerNum:%d\n",upperPacketNum,lowerPacketNum);
+				
+				char msg_type = (char)(atoi(messageType));
+				short packetNum = upperPacketNum | lowerPacketNum;
+				
+				//make sure I got everything
+				printf("Packet Number:%d\nMsg_type:%d\n",packetNum,msg_type);
+				
+				if(msg_type == type_EFI){
+					if(DEBUG) printf("Reached EOF\n");
+					eof = 1;
+					break;
+				}
+				if(msg_type == type_LST){
+					if(DEBUG) printf("Last Packet before EOF\n");
+					i = windowSize;
+					numPacketsRecv = i;
+				}
+				
+				char* message = calloc(100,sizeof(char));
+				memcpy(message,&recvBuffer[12],100);
+				
+				//allocate space in the array, and place the message in there
+				packetArray[packetNum] = message;
+				printf("Message is:%s\n",packetArray[packetNum]);
+				
+				if(DEBUG) printf("Received %d Bytes\n",numBytesRecv);
+				numBytesRecvTotal += (numBytesRecv-12);
+				
+				
+	
+				if(DEBUG) printf("Num Bytes Recv Total: %d\n",numBytesRecvTotal);
+			//	if(DEBUG) printf("Message Received: %s\n",recvBuffer);
+			}
+			else{
+				printf("Bit error\n");
+				bitError = 1;
+			}
+			bzero(recvBuffer,112);
+		}
+		//write the buffer into the file
+		if(bitError == 0){
+			for(int i = 0; i < numPacketsRecv; i++){
+				if(packetArray[i] != NULL){
+					int numBytesWritten = fwrite(packetArray[i],sizeof(char),
+												strlen(packetArray[i]),file);
+					numBytesWrittenTotal += numBytesWritten;
+				}		
+			}
 		
-		if(numBytesWrittenTotal == numBytesRecvTotal){
+			if(DEBUG) printf("Num Bytes Written Total: %d\n",numBytesWrittenTotal);		
+		
 			//send an ACK
 			if(DEBUG) printf("Successfully wrote %d bytes to file\n",numBytesWrittenTotal);
 			sendto(connection->socket,"ACK",3,0,connection->remote_addr,connection->addrlen);
+			fflush(file);
 		}
-		bzero(recvBuffer,100);
-		numBytesWrittenTotal = 0;
-		numBytesRecvTotal = 0;
+		else{
+			if(DEBUG) printf("There was a bit error. Sending NAK\n");
+			sendto(connection->socket,"NAK",3,0,connection->remote_addr,connection->addrlen);
+			bitError = 0;
+		}
+		bzero(recvBuffer,112);
 	}
 	
 	fclose(file);
@@ -321,8 +404,8 @@ int fxa_put(char* filename){
 	sendto(connection->socket,message,strlen(message),0,connection->remote_addr,connection->addrlen);
 	
 	//wait for an ACK before proceeding
-	char ACK[10] = {0};
-	recvfrom(connection->socket,ACK,10,0, connection->remote_addr,&(connection->addrlen));
+	char ack[10] = {0};
+	recvfrom(connection->socket,ack,10,0, connection->remote_addr,&(connection->addrlen));
 	
 	int result = 1;
 	if(DEBUG) printf("File to put is: %s_blah\n",filename);
@@ -377,6 +460,38 @@ int fxa_close(){
 	int numBytesSent = sendto(connection->socket,message,strlen(message),0,
 							  connection->remote_addr,connection->addrlen);
 	if(DEBUG) printf("Num Bytes Sent: %d\n",numBytesSent);
+	//wait for an ack
+	char* ACKbuffer = calloc(10,sizeof(char));
+	recvfrom(connection->socket,ACKbuffer,10,0,connection->remote_addr,&(connection->addrlen));
+	//send off a "GBE"
+	sendto(connection->socket,"GBE",3,0,connection->remote_addr,connection->addrlen);
+	connection_set = 0;
+	return 1;
+}
+
+int goodMessage(char* buffer){
+	char* firstPart = calloc(4,sizeof(char));
+	char* hash = calloc(8,sizeof(char));
+	char* secondPart = calloc(100,sizeof(char));
+	char* toCheck = calloc(104,sizeof(char));
+	char* toCheckHash = calloc(8,sizeof(char));
+	
+	//split the buffer
+	memcpy(firstPart,buffer,4);
+	memcpy(hash,&buffer[4],8);
+	memcpy(secondPart,&buffer[12],100);
+	memcpy(toCheck,firstPart,4);
+	memcpy(&toCheck[4],secondPart,100);
+	
+	char* md5_res = md5(toCheck,104);
+	
+	memcpy(toCheckHash,md5_res,8);
+	
+	//check the values
+	if(strcmp(hash,toCheckHash) == 0){
+		return 1;
+	}
+	
 	return 1;
 }
 

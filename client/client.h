@@ -18,16 +18,6 @@ typedef struct _CONN_INFO{
 	struct sockaddr *remote_addr;
 } CONN_INFO;
 
-//Message Type Definitions
-#define REQ '0'
-#define CHA '1'
-#define RES '2'
-#define ACK '3'
-#define NAK '4'
-#define DTA '5'
-#define LST '6'
-#define EFI '7'
-#define FIN '8'
 
 //function declarations
 void print_use_and_exit(void);
@@ -37,6 +27,7 @@ int connect_to_server();
 int fxa_get(char* filename);
 int fxa_put(char* filename);
 int fxa_close(void);
+int goodMessage(char* buffer);
 char* convert_name(char* filename, char* prefix);
 unsigned *md5( const char *msg, int mlen);
 int timeout_recvfrom (int sock, char *buf, int bufSize, int flags, struct sockaddr *connection, socklen_t *addrlen,int timeoutinseconds,char* messageToSend, int numIter, int resend);
