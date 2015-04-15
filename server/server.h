@@ -36,6 +36,7 @@ int process_request(char *buffer, int sizeOfBuffer, char ** response);
 int put_file(char* buffer, int sizeOfBuffer, char** response);
 int get_file(char* buffer, int sizeOfBuffer, char** response);
 int close_connection(char* buffer,char** response);
+int goodMessage(char* buffer);
 char* convert_name(char* filename, char* prefix);
 int timeout_recvfrom (int sock, char *buf, int bufSize, int flags, struct sockaddr *connection, socklen_t *addrlen,int timeoutinseconds,char* messageToSend, int numIter, int resend);
 char* add_header_info(short packet_num,char num_bytes, char msg_type, char* packet);

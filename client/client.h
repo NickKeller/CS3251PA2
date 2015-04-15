@@ -31,5 +31,6 @@ int goodMessage(char* buffer);
 char* convert_name(char* filename, char* prefix);
 unsigned *md5( const char *msg, int mlen);
 int timeout_recvfrom (int sock, char *buf, int bufSize, int flags, struct sockaddr *connection, socklen_t *addrlen,int timeoutinseconds,char* messageToSend, int numIter, int resend);
+char* add_header_info(short packet_num,char num_bytes, char msg_type, char* packet);
 void quit(char* message);
 #endif//end udp-client.h

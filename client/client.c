@@ -419,39 +419,75 @@ int fxa_put(char* filename){
 		printf("Error, %s doesn't exist!\n",filename);
 		return 0;
 	}
+		
 	//allocate space for the shorts to be read in
-	char packet[1000];
+	char packet[100];
 	int numElements = 0;
 	char bstop = 0;
 	//run the loop until end of file
 	while(!bstop){
-		//read in the starting address and number of elements
-		numElements = fread(packet, sizeof(char), 1000, file);
-		//check for EOF
-		if(numElements < 1000){
-			//EOF reached, break
-			bstop = 1;
+		//buffer up the packets
+		char* packetArray[windowSize];
+		for(int i = 0; i < windowSize; i++){
+			packetArray[i] = "0";
 		}
-		//send off the file, wait for an ACK
-		int numBytesSent = sendto(connection->socket,packet,strlen(packet),0,
-							  connection->remote_addr,connection->addrlen);
+		int numPacketsCreated = 0;
+		for(int i = 0; i < windowSize; i++){
+			//read in the starting address and number of elements
+			numElements = fread(packet, sizeof(char), 100, file);
 		
-		if(DEBUG) printf("Num bytes sent: %d\n",numBytesSent);
-		if(DEBUG) printf("Message Sent: %s\n",packet);
+			//check for EOF
+			if(numElements < 100){
+				//EOF reached, break
+				if(DEBUG) printf("Found EOF, setting bstop to 1\nSending last part of file\n");
+				bstop = 1;
+				packetArray[i] = add_header_info((short)i,(char)112,type_LST, packet);
+			}
 		
-		char recvBuffer[100];
-		int numBytesRecv = recvfrom(connection->socket,recvBuffer,100,0, connection->remote_addr,&(connection->addrlen));
-		if(strncmp(recvBuffer,"ACK",3) == 0){
-			if(DEBUG) printf("Received ACK\n");
+			else{
+				packetArray[i] = add_header_info((short)i,(char)112,type_DTA, packet);
+			}
+			numPacketsCreated++;
+			bzero(packet,100);
+			if(bstop) break;
 		}
-		numElements = 0;
-		bzero(packet,1000);
-		bzero(recvBuffer,100);
+		
+		//send off the packets
+		int recvAck = 0;
+		while(recvAck == 0){
+			for(int i = 0; i < numPacketsCreated; i++){
+				char* message = packetArray[i];
+				int numBytesSent = sendto(connection->socket,message,
+											strlen(message),0,
+											connection->remote_addr,connection->addrlen);
+		
+				if(DEBUG) printf("Num bytes sent: %d\n",numBytesSent);
+				//if(DEBUG) printf("Message Sent: %s\n",packet);
+				
+			}
+			if(DEBUG) printf("Waiting on ACK\n");
+			char recvBuffer[100] = {0};
+			int numBytesRecv = recvfrom(connection->socket,recvBuffer,100,0, connection->remote_addr,&(connection->addrlen));
+			if(strncmp(recvBuffer,"ACK",3) == 0){
+				if(DEBUG) printf("Received ACK\n");
+				recvAck = 1;
+			}
+			else{
+				if(DEBUG) printf("Received NAK\n");
+			}
+			numElements = 0;
+			bzero(recvBuffer,100);
+		}
 	}
+	//done, send the EOF
+	char* temp = calloc(4 + strlen(filename),sizeof(char));
+	memcpy(temp,"EOF ",4);
+	memcpy(&temp[4],filename,strlen(filename));
 	
+	char* EOFmessage = add_header_info((short)0,(char)112,type_EFI, temp);
+	sendto(connection->socket,EOFmessage,strlen(EOFmessage),0,
+								  connection->remote_addr,connection->addrlen);
 	fclose(file);
-	//send the EOF message
-	sendto(connection->socket,"EOF",3,0, connection->remote_addr,connection->addrlen);
 	return result;
 }
 
@@ -601,4 +637,48 @@ char* convert_name(char* filename, char* prefix){
 void quit(char* message){
 	printf("%s\n",message);
 	exit(0);
+}
+
+char* add_header_info(short packet_num,char num_bytes, char msg_type, char* packet){
+	printf("Packet_num:%d\nNum_Bytes:%d\nMsg_Type:%d\n",packet_num,num_bytes,msg_type);
+	char* firstPart = calloc(4,sizeof(char));
+	if(DEBUG) printf("Num Bytes to Hash:%d\n",4+strlen(packet));
+	
+	char* totalToHash = calloc(4+strlen(packet),sizeof(char));
+	
+	if(DEBUG) printf("Splitting packet num\n");
+	//split up packet_num into chars
+	char upperPacketNum = (char)(packet_num>>8);
+	char lowerPacketNum = (char)(packet_num);
+	if(DEBUG) printf("Upper Packet Num:%d\nLower Packet Num:%d\n",upperPacketNum,lowerPacketNum);
+	
+	if(DEBUG) printf("Loading first part of header\n");
+	//copy packet_num,num_bytes,and msg_type into firstPart
+	sprintf(&firstPart[0],"%d",upperPacketNum);
+	sprintf(&firstPart[1],"%d",lowerPacketNum);
+	sprintf(&firstPart[2],"%d",num_bytes);
+	sprintf(&firstPart[3],"%d",msg_type);
+	if(DEBUG) printf("Loading second part of header\nFirstPart:%s_blah\nPacket:%s_blah\n",firstPart,packet);
+	//join firstPart and packet and hand it off to the md5 function
+	memcpy(totalToHash,firstPart,4);
+	memcpy(&totalToHash[4],packet,strlen(packet));
+	
+	if(DEBUG) printf("Doing MD5\nHashing: %s\n",totalToHash);
+	char* md5_res = md5(totalToHash,4+strlen(packet));
+	printf("MD5 returned:%s\n",md5_res);
+	char* checksum = calloc(8,sizeof(char));
+	memcpy(checksum,md5_res,8);
+	
+	if(DEBUG) printf("Putting Message together\n");
+	char* message = calloc(112,sizeof(char));
+	//double checking
+	printf("Adjusted MD5:%s\n",checksum);
+	
+	memcpy(message,firstPart,4);
+	if(DEBUG) printf("Message is:%s\n",message);
+	memcpy(&message[4],checksum,8);
+	if(DEBUG) printf("Message is:%s\n",message);
+	memcpy(&message[12],packet,strlen(packet));
+	if(DEBUG) printf("Message is:%s\n",message);
+	return message;
 }
