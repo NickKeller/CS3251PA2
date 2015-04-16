@@ -198,7 +198,7 @@ int get_file(char* buffer, int sizeOfBuffer, char** response){
 		for(int i = 0; i < windowSize; i++){
 			packetArray[i] = NULL;
 		}
-		for(int i = 0; i < windowSize; i++){
+		for(int i = 0; i < windowSize && eof == 0; i++){
 			numBytesRecv = recvfrom(connection->socket,
 											recvBuffer,112,0,
 											connection->addr,
@@ -233,16 +233,15 @@ int get_file(char* buffer, int sizeOfBuffer, char** response){
 				if(msg_type == type_EFI){
 					if(DEBUG) printf("Reached EOF\n");
 					eof = 1;
-					break;
 				}
 				if(msg_type == type_LST){
 					if(DEBUG) printf("Last Packet before EOF\n");
+					numPacketsRecv = i+1;
 					i = windowSize;
-					numPacketsRecv = i;
 				}
 				
-				char* message = calloc(100,sizeof(char));
-				memcpy(message,&recvBuffer[12],100);
+				char* message = calloc(numBytesRecv-12,sizeof(char));
+				memcpy(message,&recvBuffer[12],numBytesRecv-12);
 				
 				//allocate space in the array, and place the message in there
 				packetArray[packetNum] = message;
@@ -265,7 +264,7 @@ int get_file(char* buffer, int sizeOfBuffer, char** response){
 		//write the buffer into the file
 		if(bitError == 0){
 			for(int i = 0; i < numPacketsRecv; i++){
-				if(packetArray[i] != NULL){
+				if(packetArray[i] != NULL && strncmp(packetArray[i],"EOF",3) != 0){
 					int numBytesWritten = fwrite(packetArray[i],sizeof(char),
 												strlen(packetArray[i]),file);
 					numBytesWrittenTotal += numBytesWritten;
@@ -306,12 +305,6 @@ int put_file(char* buffer, int sizeOfBuffer, char** response){
 	char* filename = calloc(sizeOfFileName,sizeof(char));
 	memcpy(filename,buffer,sizeOfFileName);
 	if(DEBUG) printf("File to put is: %s_blah\n",filename);
-	char* temp = calloc(4 + strlen(filename),sizeof(char));
-	memcpy(temp,"EOF ",4);
-	memcpy(&temp[4],filename,strlen(filename));
-	
-	char* message = add_header_info((short)0,(char)112,type_EFI, temp);
-	*response = message;
 	
 	//time to send the file
 	char* fullpath = convert_name(filename,"put/");
@@ -324,12 +317,19 @@ int put_file(char* buffer, int sizeOfBuffer, char** response){
 		return 1;
 	}
 	
+	if(DEBUG) printf("Sending an ack\n");
 	//send an ACK confirming the window size
 	char* windowSizeAck = calloc(7,sizeof(char));
 	snprintf(windowSizeAck,7,"ACK: %d\n",windowSize);
-	sendto(connection->socket,windowSizeAck,strlen(windowSizeAck),0,
+	int ackSent = sendto(connection->socket,windowSizeAck,strlen(windowSizeAck),0,
 								  connection->addr,connection->addrlen);
-	
+	if(ackSent < 0){
+		if(DEBUG) printf("Error sending ACK\n");
+	} 
+	//wait for the ACK from the client before preparing to send files
+	char* tempAck = calloc(3,sizeof(char));
+	int AckBytesReceived = recvfrom(connection->socket,tempAck,3,0,connection->addr,&(connection->addrlen));
+	if(DEBUG) printf("Received an ACK?\nMessage:%s\n",tempAck);
 	//allocate space for the shorts to be read in
 	char packet[100];
 	int numElements = 0;
@@ -391,12 +391,25 @@ int put_file(char* buffer, int sizeOfBuffer, char** response){
 	}
 		
 	fclose(file);
+	
+	//construct the response
+	char* temp = calloc(4 + strlen(filename),sizeof(char));
+	memcpy(temp,"EOF ",4);
+	memcpy(&temp[4],filename,strlen(filename));
+	
+	char* message = add_header_info((short)0,(char)112,type_EFI, temp);
+	*response = message;
 	return result;
 }
 
 int close_connection(char* buffer, char** response){
 	//send an ACK
-	*response = "ACK\n";
+	int numBytesSent = sendto(connection->socket,"ACK",3,0,
+							  connection->addr,connection->addrlen);
+							  
+	//wait for the GBE
+	char* GBEbuffer = calloc(5,sizeof(char));
+	*response = "";
 	return 1;
 }
 
@@ -576,6 +589,7 @@ char* add_header_info(short packet_num,char num_bytes, char msg_type, char* pack
 	printf("MD5 returned:%s\n",md5_res);
 	char* checksum = calloc(8,sizeof(char));
 	memcpy(checksum,md5_res,8);
+	checksum = "11111111";
 	
 	if(DEBUG) printf("Putting Message together\n");
 	char* message = calloc(112,sizeof(char));

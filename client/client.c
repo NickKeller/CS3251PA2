@@ -271,13 +271,16 @@ int fxa_get(char* filename){
 	//wait for the ACK from the server before preparing to receive files
 	char* recvBuffer = calloc(112,sizeof(char));
 	if(DEBUG) printf("Waiting for ACK\n");
-	int AckBytesReceived = timeout_recvfrom(connection->socket,recvBuffer,112,0,connection->remote_addr,&(connection->addrlen),2,message,5,1);
-	if(DEBUG) printf("Received an ACK?\n");
+	int AckBytesReceived = recvfrom(connection->socket,recvBuffer,112,0,connection->remote_addr,&(connection->addrlen));
+	if(DEBUG) printf("Received an ACK?\nMessage:%s\n",recvBuffer);
 	if(strncmp("ACK",recvBuffer,3) != 0){
 		printf("Error, file does not exist on the server!\n");
 		return 0;
 	}
 	if(DEBUG) printf("ACK received, starting download\n");
+	//send the GET message
+	sendto(connection->socket,"ACK",3,0,
+							  connection->remote_addr,connection->addrlen);
 	int eof = 0;
 	int bitError = 0;
 	while(!eof){
@@ -289,7 +292,7 @@ int fxa_get(char* filename){
 		for(int i = 0; i < windowSize; i++){
 			packetArray[i] = NULL;
 		}
-		for(int i = 0; i < windowSize; i++){
+		for(int i = 0; i < windowSize && eof == 0; i++){
 			numBytesRecv = recvfrom(connection->socket,
 											recvBuffer,112,0,
 											connection->remote_addr,
@@ -324,16 +327,15 @@ int fxa_get(char* filename){
 				if(msg_type == type_EFI){
 					if(DEBUG) printf("Reached EOF\n");
 					eof = 1;
-					break;
 				}
 				if(msg_type == type_LST){
 					if(DEBUG) printf("Last Packet before EOF\n");
+					numPacketsRecv = i+1;
 					i = windowSize;
-					numPacketsRecv = i;
 				}
 				
-				char* message = calloc(100,sizeof(char));
-				memcpy(message,&recvBuffer[12],100);
+				char* message = calloc(numBytesRecv-12,sizeof(char));
+				memcpy(message,&recvBuffer[12],numBytesRecv-12);
 				
 				//allocate space in the array, and place the message in there
 				packetArray[packetNum] = message;
@@ -356,7 +358,7 @@ int fxa_get(char* filename){
 		//write the buffer into the file
 		if(bitError == 0){
 			for(int i = 0; i < numPacketsRecv; i++){
-				if(packetArray[i] != NULL){
+				if(packetArray[i] != NULL && strncmp(packetArray[i],"EOF",3) != 0){
 					int numBytesWritten = fwrite(packetArray[i],sizeof(char),
 												strlen(packetArray[i]),file);
 					numBytesWrittenTotal += numBytesWritten;
@@ -479,7 +481,9 @@ int fxa_put(char* filename){
 			bzero(recvBuffer,100);
 		}
 	}
-	//done, send the EOF
+	
+	fclose(file);
+	//construct the EOF
 	char* temp = calloc(4 + strlen(filename),sizeof(char));
 	memcpy(temp,"EOF ",4);
 	memcpy(&temp[4],filename,strlen(filename));
@@ -487,7 +491,6 @@ int fxa_put(char* filename){
 	char* EOFmessage = add_header_info((short)0,(char)112,type_EFI, temp);
 	sendto(connection->socket,EOFmessage,strlen(EOFmessage),0,
 								  connection->remote_addr,connection->addrlen);
-	fclose(file);
 	return result;
 }
 
@@ -668,6 +671,7 @@ char* add_header_info(short packet_num,char num_bytes, char msg_type, char* pack
 	printf("MD5 returned:%s\n",md5_res);
 	char* checksum = calloc(8,sizeof(char));
 	memcpy(checksum,md5_res,8);
+	checksum = "11111111";
 	
 	if(DEBUG) printf("Putting Message together\n");
 	char* message = calloc(112,sizeof(char));
